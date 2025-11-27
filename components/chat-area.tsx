@@ -17,9 +17,10 @@ interface ChatAreaProps {
   onToggleSidebar: () => void
   sidebarOpen: boolean
   geminiConfigured?: boolean | null
+  isLoading?: boolean
 }
 
-export function ChatArea({ chat, onSendMessage, onToggleSidebar, sidebarOpen, geminiConfigured }: ChatAreaProps) {
+export function ChatArea({ chat, onSendMessage, onToggleSidebar, sidebarOpen, geminiConfigured, isLoading }: ChatAreaProps) {
   // Show a small banner if Gemini LLM is not configured
   const showBanner = (typeof (chat) !== 'undefined')
   
@@ -96,12 +97,13 @@ export function ChatArea({ chat, onSendMessage, onToggleSidebar, sidebarOpen, ge
       {/* Input */}
       <div className="p-4 border-t border-border">
         <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
-          <div className="relative flex items-end gap-2 bg-secondary rounded-2xl px-4 py-3">
+            <div className="relative flex items-end gap-2 bg-secondary rounded-2xl px-4 py-3">
             <Textarea
               ref={textareaRef}
               value={input}
               onChange={handleTextareaChange}
               onKeyDown={handleKeyDown}
+              disabled={!!isLoading}
               placeholder="Message AI Chat..."
               className="flex-1 min-h-[24px] max-h-[200px] resize-none bg-transparent border-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 text-foreground placeholder:text-muted-foreground"
               rows={1}
@@ -109,10 +111,17 @@ export function ChatArea({ chat, onSendMessage, onToggleSidebar, sidebarOpen, ge
             <Button
               type="submit"
               size="icon"
-              disabled={!input.trim()}
+              disabled={!input.trim() || !!isLoading}
               className="h-8 w-8 shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90 disabled:opacity-30"
             >
-              <Send className="h-4 w-4" />
+              {isLoading ? (
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
             </Button>
           </div>
           <p className="text-xs text-muted-foreground text-center mt-2">
@@ -147,6 +156,12 @@ function MessageBubble({ message }: { message: Message }) {
           <p className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</p>
           {message.source && (
             <p className="text-xs text-muted-foreground mt-1">Source: {message.source}</p>
+          )}
+          {message.source === "loading" && (
+            <div className="mt-2">
+              <span className="inline-block h-2 w-2 rounded-full bg-muted-foreground animate-pulse mr-2" />
+              <span className="text-xs text-muted-foreground">Generating answer...</span>
+            </div>
           )}
         </div>
       </div>

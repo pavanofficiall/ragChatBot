@@ -63,6 +63,7 @@ export default function Home() {
 
   const currentChat = chats.find((c) => c.id === activeChat)
   const [geminiConfigured, setGeminiConfigured] = useState<boolean | null>(null)
+  const [isLoading, setIsLoading] = useState(false)
 
   // Read health at mount
   const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
@@ -99,6 +100,7 @@ export default function Home() {
 
   const addMessage = async (content: string) => {
     if (!activeChat) return
+    if (isLoading) return
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -111,6 +113,31 @@ export default function Home() {
       prevChats.map((chat) => {
         if (chat.id === activeChat) {
           const updatedMessages = [...chat.messages, userMessage]
+          return {
+            ...chat,
+            messages: updatedMessages,
+            title: chat.messages.length === 0 ? content.slice(0, 30) + (content.length > 30 ? "..." : "") : chat.title,
+          }
+        }
+        return chat
+      }),
+    )
+    setIsLoading(true)
+
+    // Add a temporary assistant message for loading / reveal
+    const tempAssistantId = (Date.now() + 2).toString()
+    const tempAssistantMessage: Message = {
+      id: tempAssistantId,
+      role: "assistant",
+      content: "",
+      source: "loading",
+      mode: "llm",
+      timestamp: new Date(),
+    }
+    setChats((prevChats) =>
+      prevChats.map((chat) => {
+        if (chat.id === activeChat) {
+          const updatedMessages = [...chat.messages, tempAssistantMessage]
           return {
             ...chat,
             messages: updatedMessages,
@@ -146,30 +173,67 @@ export default function Home() {
       assistantText = generateResponse(content)
     }
 
-    const assistantMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      role: "assistant",
-      content: assistantText,
-      source: assistantSource,
-      mode: assistantMode,
-      timestamp: new Date(),
-    }
-
-    // Append the assistant's response
-    // Append assistant message using functional state update to avoid stale state
-    setChats((prevChats) =>
-      prevChats.map((chat) => {
-        if (chat.id === activeChat) {
-          const updatedMessages = [...chat.messages, assistantMessage]
-          return {
-            ...chat,
-            messages: updatedMessages,
-            title: chat.messages.length === 0 ? content.slice(0, 30) + (content.length > 30 ? "..." : "") : chat.title,
+    // We will reveal assistantText line-by-line by progressively updating the temp message
+    const revealTextIntoMessage = async (chatId: string, messageId: string, fullText: string) => {
+      // Split into logical lines; if there's only one, split by sentences or fallback to char chunks
+      const lines = fullText.split(/\n+/).filter(Boolean)
+      let chunks: string[] = []
+      if (lines.length > 1) {
+        chunks = lines
+      } else {
+        // Split into sentences
+        const sentences = fullText.match(/[^.!?]+[.!?]*/g)
+        if (sentences && sentences.length > 1) {
+          chunks = sentences.map(s => s.trim())
+        } else {
+          // fallback: split into 60-char chunks
+          const l = 60
+          for (let i = 0; i < fullText.length; i += l) {
+            chunks.push(fullText.slice(i, i + l))
           }
         }
-        return chat
-      }),
-    )
+      }
+
+      let built = ""
+      // Gradually append each chunk with a small delay to simulate typing / streaming
+      const reveal = async () => {
+        for (let i = 0; i < chunks.length; i++) {
+          // Add space/newline between chunks
+          built = built + (built.length > 0 ? "\n" : "") + chunks[i]
+          setChats(prevChats =>
+            prevChats.map(chat => {
+              if (chat.id === chatId) {
+                return {
+                  ...chat,
+                  messages: chat.messages.map(m => (m.id === messageId ? { ...m, content: built } : m)),
+                }
+              }
+              return chat
+            }),
+          )
+          // Stagger times depending on chunk length; at least 50ms, at most 500ms
+          const delay = Math.min(Math.max(60 * (chunks[i].length / 20), 50), 500)
+          await new Promise(r => setTimeout(r, delay))
+        }
+        // Finalize message: set real source & mode
+        setChats(prevChats =>
+          prevChats.map(chat => {
+            if (chat.id === chatId) {
+              return {
+                ...chat,
+                messages: chat.messages.map(m => (m.id === messageId ? { ...m, source: assistantSource || "llm", mode: assistantMode } : m)),
+              }
+            }
+            return chat
+          }),
+        )
+      }
+      await reveal()
+    }
+
+    // Update the temporary assistant message to start streaming; call reveal helper
+    await revealTextIntoMessage(activeChat, tempAssistantId, assistantText)
+    setIsLoading(false)
   }
 
   const generateResponse = (input: string): string => {
@@ -200,6 +264,7 @@ export default function Home() {
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         sidebarOpen={sidebarOpen}
         geminiConfigured={geminiConfigured}
+        isLoading={isLoading}
       />
     </div>
   )
